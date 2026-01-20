@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+tokio = { version = "1.49.0", features = ["full"] }
+anyhow = "1.0.100"
+thiserror = "2.0.18"
+notify = "8.2.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
