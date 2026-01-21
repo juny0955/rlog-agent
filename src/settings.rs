@@ -5,6 +5,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     pub name: String,
+    pub timezone: String,
     pub sources: Vec<SourceSettings>,
 }
 
