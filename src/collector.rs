@@ -1,4 +1,5 @@
 use crate::models::LogEvent;
+use crate::settings::SourceSettings;
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use chrono_tz::Tz;
@@ -18,18 +19,18 @@ pub struct Collector {
 }
 
 impl Collector {
-    pub fn new(tx: Sender<LogEvent>, label: String, path: String, tz: String) -> Result<Self> {
-        let path = PathBuf::from(path);
+    pub fn new(tx: Sender<LogEvent>, source: SourceSettings, tz: String) -> Result<Self> {
+        let path = PathBuf::from(source.path);
         let file = File::open(&path)
-            .with_context(|| format!("파일 열기 실패: {}", label))?;
+            .with_context(|| format!("파일 열기 실패: {}", source.label))?;
 
         let position = file.metadata()
-            .with_context(|| format!("파일 메타데이터 읽기 실패: {}", label))?
+            .with_context(|| format!("파일 메타데이터 읽기 실패: {}", source.label))?
             .len();
 
         let tz = tz.parse::<Tz>()?;
 
-        Ok(Self { tx, label, path, tz, position })
+        Ok(Self { tx, label: source.label, path, tz, position })
     }
 
     pub async fn start(&mut self) {
