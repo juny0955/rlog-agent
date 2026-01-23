@@ -13,3 +13,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 config = { version = "0.15.19", features = ["yaml"] }
 chrono = { version = "0.4.43", features = ["serde"] }
 chrono-tz = "0.10.4"
+tonic = { version = "0.14.2", features = ["transport"] }
+prost = "0.14.3"
+
+[build-dependencies]
+tonic-prost-build = "0.14.2"

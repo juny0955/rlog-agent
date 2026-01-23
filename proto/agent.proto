@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+service AgentService {
+  rpc Send(LogBatch) returns (SendAck);
+}
+
+message LogBatch {
+  string agent_id = 1;
+  string agent_name = 2;
+  repeated Log logs = 3;
+}
+
+message Log {
+  string label = 1;
+  string line = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+message SendAck {
+  bool ok = 1;
+  string message = 2;
+}
