@@ -4,14 +4,15 @@ mod collector;
 mod forwarder;
 
 use crate::collector::Collector;
+use crate::forwarder::Forwarder;
 use crate::models::LogEvent;
 use crate::settings::Settings;
 use anyhow::{Context, Result};
+use chrono_tz::Tz;
 use tokio::signal;
 use tokio::sync::mpsc;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-use forwarder::Forwarder;
 
 #[tokio::main]
 async fn main() -> Result<()>{
@@ -26,9 +27,11 @@ async fn main() -> Result<()>{
     info!("settings loaded");
     info!("{} started", settings.name);
 
+    // collector 생성
     let (collector_tx, collector_rx) = mpsc::channel::<LogEvent>(100);
+    let tz = settings.timezone.parse::<Tz>()?;
     for source in settings.sources {
-        let mut collector = Collector::new(collector_tx.clone(), source, settings.timezone.clone())?;
+        let mut collector = Collector::new(collector_tx.clone(), source, tz)?;
         tokio::spawn(async move {
             collector.start().await;
         });

@@ -1,6 +1,6 @@
 use crate::models::LogEvent;
 use crate::settings::SourceSettings;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use chrono::Utc;
 use chrono_tz::Tz;
 use notify::{recommended_watcher, Watcher};
@@ -15,12 +15,14 @@ pub struct Collector {
     label: String,
     path: PathBuf,
     tz: Tz,
+    reader: BufReader<File>,
     position: u64,
 }
 
 impl Collector {
-    pub fn new(tx: Sender<LogEvent>, source: SourceSettings, tz: String) -> Result<Self> {
+    pub fn new(tx: Sender<LogEvent>, source: SourceSettings, tz: Tz) -> Result<Self> {
         let path = PathBuf::from(source.path);
+
         let file = File::open(&path)
             .with_context(|| format!("파일 열기 실패: {}", source.label))?;
 
@@ -28,9 +30,11 @@ impl Collector {
             .with_context(|| format!("파일 메타데이터 읽기 실패: {}", source.label))?
             .len();
 
-        let tz = tz.parse::<Tz>()?;
+        let mut reader = BufReader::new(file);
+        reader.seek(SeekFrom::Start(position))
+            .with_context(|| format!("파일 포인터 이동 실패: {}", source.label))?;
 
-        Ok(Self { tx, label: source.label, path, tz, position })
+        Ok(Self { tx, label: source.label, path, tz, reader, position })
     }
 
     pub async fn start(&mut self) {
@@ -60,26 +64,19 @@ impl Collector {
     }
 
     async fn read_line_to_send(&mut self, line: &mut String) -> Result<()> {
-        let file = File::open(&self.path)
-            .context("파일 열기 실패")?;
-
-        let current_position = file.metadata()
+        let current_len = self.reader.get_ref()
+            .metadata()
             .context("파일 메타데이터 읽기 실패")?
             .len();
 
-        if current_position < self.position {
+        if current_len < self.position {
             info!("{} 로테이션 감지", self.label);
-            self.position = 0;
+            self.reopen()?;
         }
 
-        let mut reader = BufReader::new(file);
-        reader.seek(SeekFrom::Start(self.position))
-            .context("파일 포인터 이동 실패")?;
-
         loop {
-            let read_bytes = reader.read_line(line)
+            let read_bytes = self.reader.read_line(line)
                 .context("라인 읽기 실패")?;
-
             if read_bytes == 0 { break; }
 
             if !line.ends_with('\n') {
@@ -94,17 +91,29 @@ impl Collector {
                     timestamp: Utc::now().with_timezone(&self.tz),
                 };
 
-                if let Err(e) = self.tx.send(event).await {
-                    error!("{} 로그 전송 실패: {}", self.label, e);
-                    bail!("메세지 채널 닫힘");
-                }
+                self.tx.send(event).await
+                    .context("메세지 채널 닫힘")?;
             }
 
-            self.position = reader.stream_position()
+            self.position = self.reader.stream_position()
                 .context("파일 포인터 업데이트 실패")?;
 
             line.clear();
         }
+
+        Ok(())
+    }
+
+    fn reopen(&mut self) -> Result<()> {
+        let file = File::open(&self.path)
+            .context("파일 열기 실패")?;
+
+        let mut reader = BufReader::new(file);
+        reader.seek(SeekFrom::Start(0))
+            .context("파일 포인터 이동 실패")?;
+
+        self.reader = reader;
+        self.position = 0;
 
         Ok(())
     }
