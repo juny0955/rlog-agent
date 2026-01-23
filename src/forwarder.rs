@@ -1,8 +1,8 @@
+use crate::models::LogEvent;
 use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 use tokio::time;
 use tracing::info;
-use crate::models::LogEvent;
 
 pub struct Forwarder {
     rx: Receiver<LogEvent>,

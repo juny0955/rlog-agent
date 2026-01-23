@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use chrono_tz::Tz;
 use notify::{recommended_watcher, Watcher};
-use std::fs::File;
+use std::fs::{metadata, File};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
 use tokio::sync::mpsc::{self, Sender};
@@ -19,6 +19,11 @@ pub struct Collector {
     position: u64,
 }
 
+/* TODO
+    로테이션 감지 수정 필요
+    unix -> inode
+    windows -> create time or file index
+ */
 impl Collector {
     pub fn new(tx: Sender<LogEvent>, source: SourceSettings, tz: Tz) -> Result<Self> {
         let path = PathBuf::from(source.path);
@@ -42,7 +47,9 @@ impl Collector {
 
         let mut watcher = recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
-                if event.kind.is_modify() { let _ = watcher_tx.try_send(()); }
+                if event.kind.is_modify() {
+                    let _ = watcher_tx.try_send(());
+                }
             }
         }).expect("watcher 생성 실패");
 
@@ -58,7 +65,7 @@ impl Collector {
             trace!("{} 파일 변경 감지", self.label);
 
             if let Err(e) = self.read_line_to_send(&mut line).await {
-                error!("{} ({}) 파일 읽기 중 오류 {}", self.label, self.path.display(), e);
+                error!("{} ({}) 파일 읽기 중 오류: {}", self.label, self.path.display(), e);
             }
         }
     }
@@ -70,14 +77,26 @@ impl Collector {
             .len();
 
         if current_len < self.position {
-            info!("{} 로테이션 감지", self.label);
+            info!("{} 턴케이트 감지", self.label);
             self.reopen()?;
         }
 
         loop {
             let read_bytes = self.reader.read_line(line)
                 .context("라인 읽기 실패")?;
-            if read_bytes == 0 { break; }
+            if read_bytes == 0 {
+                let path_len = metadata(&self.path)
+                    .context("파일 메타데이터 읽기 실패")?
+                    .len();
+
+                if path_len != self.position {
+                    info!("{} 로테이션 감지", self.label);
+                    self.reopen()?;
+                    continue;
+                }
+
+                break;
+            }
 
             if !line.ends_with('\n') {
                 line.clear();
