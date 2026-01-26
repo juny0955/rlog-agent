@@ -2,6 +2,9 @@ mod settings;
 mod models;
 mod collector;
 mod forwarder;
+mod agent {
+    tonic::include_proto!("agent");
+}
 
 use crate::collector::Collector;
 use crate::forwarder::Forwarder;
@@ -16,6 +19,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+use crate::agent::LogBatch;
 
 #[tokio::main]
 async fn main() -> Result<()>{
@@ -32,6 +36,7 @@ async fn main() -> Result<()>{
     let shutdown = CancellationToken::new();
 
     let (collector_tx, collector_rx) = mpsc::channel::<LogEvent>(100);
+    let (streamer_tx, streamer_rx) = mpsc::channel::<LogBatch>(1000);
 
     let collector_handles = start_collectors(
         collector_tx,
@@ -40,8 +45,12 @@ async fn main() -> Result<()>{
         shutdown.child_token()
     ).await?;
 
+    let agent_name = settings.name.clone();
     let mut forwarder_handle = start_forwarder(
         collector_rx,
+        streamer_tx,
+        "agent-001".to_string(),
+        agent_name,
         settings.batch_size,
         settings.flush_interval,
     ).await?;
@@ -89,10 +98,13 @@ async fn start_collectors(
 
 async fn start_forwarder(
     rx: Receiver<LogEvent>,
+    tx: Sender<LogBatch>,
+    agent_id: String,
+    agent_name: String,
     batch_size: usize,
     flush_interval: u64,
 ) -> Result<JoinHandle<()>> {
-    let forwarder = Forwarder::new(rx, batch_size, flush_interval);
+    let forwarder = Forwarder::new(rx, tx, agent_id, agent_name, batch_size, flush_interval);
     let handle = tokio::spawn(async move {
        forwarder.start().await;
     });
