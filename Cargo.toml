@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 tokio = { version = "1.49.0", features = ["full"] }
+tokio-util = "0.7.18"
 anyhow = "1.0.100"
 notify = "8.2.0"
 tracing = "0.1.44"
@@ -12,7 +13,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 serde = { version = "1.0.228", features = ["derive"] }
 config = { version = "0.15.19", features = ["yaml"] }
 chrono = { version = "0.4.43", features = ["serde"] }
-chrono-tz = "0.10.4"
+chrono-tz = { version = "0.10.4", features = ["serde"] }
 tonic = { version = "0.14.2", features = ["transport"] }
 prost = "0.14.3"
 

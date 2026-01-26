@@ -6,16 +6,17 @@ use chrono_tz::Tz;
 use notify::{recommended_watcher, Watcher};
 use std::fs::Metadata;
 use std::io::SeekFrom;
+use std::path::PathBuf;
 use tokio::fs::{metadata, File};
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::mpsc::{self, Sender};
-use tracing::{error, info, trace, warn};
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info, warn};
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
-use std::path::PathBuf;
 
 pub struct Collector {
     tx: Sender<LogEvent>,
@@ -37,14 +38,14 @@ impl Collector {
         Ok(Self { tx, label: source.label, path, tz, reader, position, file_id })
     }
 
-    pub async fn start(&mut self) {
+    pub async fn start(&mut self, shutdown: CancellationToken) {
         let (watcher_tx, mut watcher_rx) = mpsc::channel::<()>(1);
 
         let mut watcher = recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res && event.kind.is_modify() {
                 let _ = watcher_tx.try_send(());
             }
-        }).expect("watcher 생성 실패");
+        }).expect("Watcher 생성 실패");
 
         if let Err(e) = watcher.watch(&self.path, notify::RecursiveMode::NonRecursive) {
             error!("{} 파일 감지 설정 중 오류 {}", self.label, e);
@@ -54,13 +55,26 @@ impl Collector {
         info!("{} 파일 감지 시작", self.label);
 
         let mut line = String::new();
-        while watcher_rx.recv().await.is_some() {
-            trace!("{} 파일 변경 감지", self.label);
-
-            if let Err(e) = self.read_line_to_send(&mut line).await {
-                warn!("{} ({}) 파일 읽기 중 오류: {}", self.label, self.path.display(), e);
+        loop {
+            tokio::select! {
+                _ = shutdown.cancelled() => {
+                    let _ = self.read_line_to_send(&mut line).await;
+                    break;
+                }
+                recv = watcher_rx.recv() => {
+                    match recv {
+                        Some(()) => {
+                            if let Err(e) = self.read_line_to_send(&mut line).await {
+                                warn!("{} ({}) 파일 읽기 중 오류: {}", self.label, self.path.display(), e);
+                            }
+                        }
+                        None => break,
+                    }
+                }
             }
         }
+        
+        info!("{} Collector 종료..", self.label);
     }
 
     async fn read_line_to_send(&mut self, line: &mut String) -> Result<()> {
@@ -92,13 +106,13 @@ impl Collector {
         let current_len = meta.len();
 
         if current_file_id != self.file_id {
-            info!("{} 로테이션 감지", self.label);
+            info!("{} Rotation 감지", self.label);
             self.reopen(false).await?;
             return Ok(true);
         }
 
         if current_len < self.position {
-            info!("{} 트렁케이트  감지 {} -> {}", self.label, self.position, current_len);
+            info!("{} Truncation  감지 {} -> {}", self.label, self.position, current_len);
             self.reopen(true).await?;
             return Ok(true);
         }

@@ -1,11 +1,13 @@
 use anyhow::Result;
+use chrono_tz::Tz;
 use config::{Config, File};
 use serde::Deserialize;
+use tracing::info;
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     pub name: String,
-    pub timezone: String,
+    pub timezone: Tz,
 
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
@@ -31,6 +33,7 @@ impl Settings {
             .build()?
             .try_deserialize()?;
 
+        info!("설정 로드 완료");
         Ok(settings)
     }
 }

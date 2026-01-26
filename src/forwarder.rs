@@ -35,18 +35,19 @@ impl Forwarder {
                             }
                         }
                         None => {
-                            info!("채널 닫힘");
+                            info!("모든 Collector 종료, 잔여 데이터 전송 중..");
                             self.flush(&mut batch).await;
                             break;
                         }
                     }
                 }
                 _ = interval.tick() => {
-                    info!("인터벌 이벤트");
                     self.flush(&mut batch).await;
                 }
             }
         }
+
+        info!("Forwarder 종료..");
     }
 
     async fn flush(&self, batch: &mut Vec<LogEvent>) {
