@@ -31,7 +31,7 @@ async fn main() -> Result<()>{
     let (collector_tx, collector_rx) = mpsc::channel::<LogEvent>(100);
     let tz = settings.timezone.parse::<Tz>()?;
     for source in settings.sources {
-        let mut collector = Collector::new(collector_tx.clone(), source, tz)?;
+        let mut collector = Collector::new(collector_tx.clone(), source, tz).await?;
         tokio::spawn(async move {
             collector.start().await;
         });

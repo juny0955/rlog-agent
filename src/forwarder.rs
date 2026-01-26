@@ -31,6 +31,7 @@ impl Forwarder {
 
                             if batch.len() >= self.batch_size {
                                 self.flush(&mut batch).await;
+                                interval.reset();
                             }
                         }
                         None => {

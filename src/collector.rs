@@ -4,9 +4,10 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use chrono_tz::Tz;
 use notify::{recommended_watcher, Watcher};
-use std::fs::{metadata, File, Metadata};
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::fs::Metadata;
+use std::io::SeekFrom;
+use tokio::fs::{metadata, File};
+use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::mpsc::{self, Sender};
 use tracing::{error, info, trace, warn};
 
@@ -14,6 +15,7 @@ use tracing::{error, info, trace, warn};
 use std::os::unix::fs::MetadataExt;
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
+use std::path::PathBuf;
 
 pub struct Collector {
     tx: Sender<LogEvent>,
@@ -26,10 +28,10 @@ pub struct Collector {
 }
 
 impl Collector {
-    pub fn new(tx: Sender<LogEvent>, source: SourceSettings, tz: Tz) -> Result<Self> {
+    pub async fn new(tx: Sender<LogEvent>, source: SourceSettings, tz: Tz) -> Result<Self> {
         let path = PathBuf::from(source.path);
 
-        let (reader, position, file_id) = open_file(&path, true)
+        let (reader, position, file_id) = open_file(&path, true).await
             .with_context(|| format!("파일 열기 실패: {}", source.label))?;
 
         Ok(Self { tx, label: source.label, path, tz, reader, position, file_id })
@@ -63,10 +65,10 @@ impl Collector {
 
     async fn read_line_to_send(&mut self, line: &mut String) -> Result<()> {
         loop {
-            let read_bytes = self.reader.read_line(line).context("라인 읽기 실패")?;
+            let read_bytes = self.reader.read_line(line).await.context("라인 읽기 실패")?;
 
             if read_bytes == 0 {
-                if let Ok(meta) = metadata(&self.path) && self.check_rotation_or_truncate(meta)? {
+                if let Ok(meta) = metadata(&self.path).await && self.check_rotation_or_truncate(meta).await? {
                     continue;
                 }
                 break;
@@ -85,19 +87,19 @@ impl Collector {
         Ok(())
     }
 
-    fn check_rotation_or_truncate(&mut self, meta: Metadata) -> Result<bool> {
+    async fn check_rotation_or_truncate(&mut self, meta: Metadata) -> Result<bool> {
         let current_file_id = get_file_id(&meta);
         let current_len = meta.len();
 
         if current_file_id != self.file_id {
             info!("{} 로테이션 감지", self.label);
-            self.reopen(false)?;
+            self.reopen(false).await?;
             return Ok(true);
         }
 
         if current_len < self.position {
             info!("{} 트렁케이트  감지 {} -> {}", self.label, self.position, current_len);
-            self.reopen(true)?;
+            self.reopen(true).await?;
             return Ok(true);
         }
 
@@ -120,8 +122,8 @@ impl Collector {
         Ok(())
     }
 
-    fn reopen(&mut self, seek_to_end: bool) -> Result<()> {
-        let (reader, position, file_id) = open_file(&self.path, seek_to_end).context("파일 재열기 실패")?;
+    async fn reopen(&mut self, seek_to_end: bool) -> Result<()> {
+        let (reader, position, file_id) = open_file(&self.path, seek_to_end).await.context("파일 재열기 실패")?;
 
         self.reader = reader;
         self.position = position;
@@ -131,16 +133,16 @@ impl Collector {
     }
 }
 
-fn open_file(path: &PathBuf, seek_to_end: bool) -> Result<(BufReader<File>, u64, u64)> {
-    let file = File::open(path).context("파일 열기 실패")?;
+async fn open_file(path: &PathBuf, seek_to_end: bool) -> Result<(BufReader<File>, u64, u64)> {
+    let file = File::open(path).await.context("파일 열기 실패")?;
 
-    let meta = file.metadata().context("파일 메타데이터 읽기 실패")?;
+    let meta = file.metadata().await.context("파일 메타데이터 읽기 실패")?;
 
     let position = if seek_to_end { meta.len() } else { 0 };
     let file_id = get_file_id(&meta);
 
     let mut reader = BufReader::new(file);
-    reader.seek(SeekFrom::Start(position)).context("파일 포인터 이동 실패")?;
+    reader.seek(SeekFrom::Start(position)).await.context("파일 포인터 이동 실패")?;
 
     Ok((reader, position, file_id))
 }
@@ -153,7 +155,7 @@ fn get_file_id(meta: &Metadata) -> u64 {
 
     #[cfg(windows)]
     {
-        // file_index()가 unstable 이라서 creation_time 사용
+        // NOTE: file_index()가 unstable 이라서 creation_time 사용
         // meta.file_index().unwrap_or(0)
         meta.creation_time()
     }
