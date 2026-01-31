@@ -12,19 +12,21 @@ message RegisterRequest {
     string hostname = 2;
     string os = 3;
     string os_version = 4;
+    optional string agent_uuid = 5;  // 재등록 시 사용
 }
 
 message RegisterResponse {
     bool success = 1;
 
-    string access_token = 2;
-    string refresh_token = 3;
+    string agent_uuid = 2;
+    string access_token = 3;
+    string refresh_token = 4;
 
-    string timezone = 4;
-    uint64 batch_size = 5;
-    uint64 flush_interval_sec = 6;
+    string timezone = 5;
+    uint64 batch_size = 6;
+    uint64 flush_interval_sec = 7;
 
-    repeated Source sources = 7;
+    repeated Source sources = 8;
 
     message Source {
         string label = 1;

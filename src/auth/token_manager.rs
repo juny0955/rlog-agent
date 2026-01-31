@@ -6,7 +6,8 @@ use crate::auth::client::AuthClient;
 use anyhow::{anyhow, Result};
 use tracing::{error, info};
 
-static TOKEN_PATH: &str = "tmp/token";
+static TOKEN_PATH: &str = "state/token";
+static AGENT_UUID_PATH: &str = "state/agent_uuid";
 
 pub type SharedAccessToken = Arc<RwLock<String>>;
 
@@ -14,22 +15,34 @@ pub struct TokenManager {
     auth_client: AuthClient,
     access_token: SharedAccessToken,
     refresh_token: String,
+    agent_uuid: String,
+    project_key: String,
 }
 
 impl TokenManager {
-    pub fn new(auth_client: AuthClient, access_token: String, refresh_token: String) -> Result<Self> {
+    pub fn new(
+        auth_client: AuthClient,
+        access_token: String,
+        refresh_token: String,
+        agent_uuid: String,
+        project_key: String,
+    ) -> Result<Self> {
         Self::save_refresh_token(&refresh_token)?;
+        Self::save_agent_uuid(&agent_uuid)?;
 
         Ok(Self {
             auth_client,
             access_token: Arc::new(RwLock::new(access_token)),
             refresh_token,
+            agent_uuid,
+            project_key,
         })
     }
 
     /// 파일에서 refresh_token 로드 후 access_token 발급
-    pub async fn load(mut auth_client: AuthClient) -> Result<Self> {
+    pub async fn load(mut auth_client: AuthClient, project_key: String) -> Result<Self> {
         let refresh_token = Self::load_refresh_token()?;
+        let agent_uuid = Self::load_agent_uuid().unwrap_or_default();
 
         let response = auth_client.refresh(refresh_token.clone()).await?;
 
@@ -46,16 +59,24 @@ impl TokenManager {
             access_token: Arc::new(RwLock::new(response.access_token)),
             refresh_token: new_refresh_token,
             auth_client,
+            agent_uuid,
+            project_key,
         })
     }
 
     /// access_token 갱신
     pub async fn refresh(&mut self) -> Result<()> {
-        let response = self.auth_client.refresh(self.refresh_token.clone()).await?;
-
-        if !response.success {
-            return Err(anyhow!("토큰 갱신 실패"));
-        }
+        let response = match self.auth_client.refresh(self.refresh_token.clone()).await {
+            Ok(resp) if resp.success => resp,
+            Ok(_) => {
+                info!("토큰 갱신 실패, 재등록 시도");
+                return self.re_register().await;
+            }
+            Err(e) => {
+                info!("토큰 갱신 오류: {:?}, 재등록 시도", e);
+                return self.re_register().await;
+            }
+        };
 
         match self.access_token.write() {
             Ok(mut token) => *token = response.access_token,
@@ -69,6 +90,34 @@ impl TokenManager {
         }
 
         info!("토큰 갱신 완료");
+        Ok(())
+    }
+
+    /// 저장된 agent_uuid로 재등록
+    async fn re_register(&mut self) -> Result<()> {
+        let agent_uuid = Self::load_agent_uuid().ok();
+        let response = self
+            .auth_client
+            .register(&self.project_key, agent_uuid.as_deref())
+            .await?;
+
+        if !response.success {
+            return Err(anyhow!("재등록 실패"));
+        }
+
+        // 토큰 갱신
+        match self.access_token.write() {
+            Ok(mut token) => *token = response.access_token,
+            Err(e) => error!("access_token 쓰기 실패 (RwLock poisoned): {:?}", e),
+        }
+        self.refresh_token = response.refresh_token.clone();
+        self.agent_uuid = response.agent_uuid.clone();
+
+        // 파일 저장
+        Self::save_refresh_token(&response.refresh_token)?;
+        Self::save_agent_uuid(&response.agent_uuid)?;
+
+        info!("재등록 완료");
         Ok(())
     }
 
@@ -89,14 +138,33 @@ impl TokenManager {
     }
 
     fn save_refresh_token(refresh_token: &str) -> Result<()> {
-        let path = Path::new(TOKEN_PATH);
+        Self::save_to_file(TOKEN_PATH, refresh_token)
+    }
+
+    fn load_agent_uuid() -> Result<String> {
+        let path = Path::new(AGENT_UUID_PATH);
+        let agent_uuid = fs::read_to_string(path)?;
+
+        if agent_uuid.trim().is_empty() {
+            return Err(anyhow!("저장된 agent_uuid가 비어 있음"));
+        }
+
+        Ok(agent_uuid)
+    }
+
+    fn save_agent_uuid(agent_uuid: &str) -> Result<()> {
+        Self::save_to_file(AGENT_UUID_PATH, agent_uuid)
+    }
+
+    fn save_to_file(file_path: &str, content: &str) -> Result<()> {
+        let path = Path::new(file_path);
 
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
 
         let tmp = path.with_extension("tmp");
-        fs::write(&tmp, refresh_token)?;
+        fs::write(&tmp, content)?;
         fs::rename(&tmp, path)?;
 
         // Unix 파일 권한 설정 (0600 - 소유자만 읽기/쓰기)

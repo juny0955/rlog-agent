@@ -119,7 +119,7 @@ async fn load_settings_and_auth() -> Result<(Settings, TokenManager)> {
         Ok(settings) => {
             // 설정 파일 있음 -> 저장된 토큰으로 인증
             let auth_client = AuthClient::connect(&settings.server_addr).await?;
-            let token_manager = TokenManager::load(auth_client).await?;
+            let token_manager = TokenManager::load(auth_client, settings.project_key.clone()).await?;
             info!("설정 및 토큰 로드 완료");
             Ok((settings, token_manager))
         }
@@ -129,13 +129,13 @@ async fn load_settings_and_auth() -> Result<(Settings, TokenManager)> {
             let (server_addr, project_key) = get_env()?;
 
             let mut auth_client = AuthClient::connect(&server_addr).await?;
-            let response = auth_client.register(&project_key).await?;
+            let response = auth_client.register(&project_key, None).await?;
 
             if !response.success {
                 bail!("에이전트 등록 실패");
             }
 
-            let settings = Settings::from_response(response.clone(), server_addr.clone(), project_key)?;
+            let settings = Settings::from_response(response.clone(), server_addr.clone(), project_key.clone())?;
             settings.save_settings()?;
 
             let auth_client_for_token = AuthClient::connect(&server_addr).await?;
@@ -143,6 +143,8 @@ async fn load_settings_and_auth() -> Result<(Settings, TokenManager)> {
                 auth_client_for_token,
                 response.access_token,
                 response.refresh_token,
+                response.agent_uuid,
+                project_key,
             )?;
 
             info!("에이전트 등록 및 설정 저장 완료");

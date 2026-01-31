@@ -1,4 +1,3 @@
-use std::fmt::format;
 use anyhow::Result;
 use tonic::transport::Channel;
 use tracing::info;
@@ -16,7 +15,7 @@ impl AuthClient {
         Ok(Self { client })
     }
 
-    pub async fn register(&mut self, project_key: &str) -> Result<RegisterResponse> {
+    pub async fn register(&mut self, project_key: &str, agent_uuid: Option<&str>) -> Result<RegisterResponse> {
         let hostname = gethostname::gethostname().to_string_lossy().into_owned();
 
         let os_info = os_info::get();
@@ -28,6 +27,7 @@ impl AuthClient {
             hostname,
             os,
             os_version,
+            agent_uuid: agent_uuid.map(|s| s.to_string()),
         };
 
         let response = self.client.register(req).await?.into_inner();
