@@ -28,6 +28,7 @@ impl Interceptor for AuthInterceptor {
         let value = format!("Bearer {}", token)
             .parse()
             .map_err(|_| Status::internal("Invalid token format"))?;
+
         request.metadata_mut().insert("authorization", value);
 
         Ok(request)

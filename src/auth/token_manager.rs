@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use crate::auth::client::AuthClient;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use tracing::{error, info};
 
 static TOKEN_PATH: &str = "state/token";
@@ -44,20 +44,21 @@ impl TokenManager {
         let refresh_token = Self::load_refresh_token()?;
         let agent_uuid = Self::load_agent_uuid().unwrap_or_default();
 
-        let response = auth_client.refresh(refresh_token.clone()).await?;
-
-        if !response.success {
-            return Err(anyhow!("토큰 갱신 실패"));
-        }
-
-        Self::save_refresh_token(&response.refresh_token)?;
-        let new_refresh_token = response.refresh_token;
-
-        info!("저장된 토큰으로 인증 완료");
+        let (access_token, refresh_token, agent_uuid) = match auth_client.refresh(refresh_token.clone()).await {
+            Ok(resp) if resp.success => {
+                Self::save_refresh_token(&resp.refresh_token)?;
+                info!("저장된 토큰으로 인증 완료");
+                (resp.access_token, resp.refresh_token, agent_uuid)
+            }
+            Ok(_) | Err(_) => {
+                info!("토큰 갱신 실패, 재등록 시도");
+                Self::do_register(&mut auth_client, &project_key).await?
+            }
+        };
 
         Ok(Self {
-            access_token: Arc::new(RwLock::new(response.access_token)),
-            refresh_token: new_refresh_token,
+            access_token: Arc::new(RwLock::new(access_token)),
+            refresh_token,
             auth_client,
             agent_uuid,
             project_key,
@@ -68,20 +69,13 @@ impl TokenManager {
     pub async fn refresh(&mut self) -> Result<()> {
         let response = match self.auth_client.refresh(self.refresh_token.clone()).await {
             Ok(resp) if resp.success => resp,
-            Ok(_) => {
+            Ok(_) | Err(_)=> {
                 info!("토큰 갱신 실패, 재등록 시도");
-                return self.re_register().await;
-            }
-            Err(e) => {
-                info!("토큰 갱신 오류: {:?}, 재등록 시도", e);
                 return self.re_register().await;
             }
         };
 
-        match self.access_token.write() {
-            Ok(mut token) => *token = response.access_token,
-            Err(e) => error!("access_token 쓰기 실패 (RwLock poisoned): {:?}", e),
-        }
+        self.update_access_token(&response.access_token);
 
         // refresh token rotation 지원
         if !response.refresh_token.is_empty() {
@@ -89,36 +83,49 @@ impl TokenManager {
             Self::save_refresh_token(&self.refresh_token)?;
         }
 
-        info!("토큰 갱신 완료");
         Ok(())
     }
 
     /// 저장된 agent_uuid로 재등록
     async fn re_register(&mut self) -> Result<()> {
+        let (access_token, refresh_token, agent_uuid) =
+            Self::do_register(&mut self.auth_client, &self.project_key).await?;
+
+        self.update_access_token(&access_token);
+        self.refresh_token = refresh_token;
+        self.agent_uuid = agent_uuid;
+
+        Ok(())
+    }
+
+    /// 등록 수행 (신규/재등록 공통)
+    async fn do_register(
+        auth_client: &mut AuthClient,
+        project_key: &str,
+    ) -> Result<(String, String, String)> {
         let agent_uuid = Self::load_agent_uuid().ok();
-        let response = self
-            .auth_client
-            .register(&self.project_key, agent_uuid.as_deref())
-            .await?;
+        let response = auth_client
+            .register(project_key, agent_uuid.as_deref())
+            .await
+            .context("등록 중 오류")?;
 
         if !response.success {
-            return Err(anyhow!("재등록 실패"));
+            return Err(anyhow!("등록 실패"));
         }
 
-        // 토큰 갱신
-        match self.access_token.write() {
-            Ok(mut token) => *token = response.access_token,
-            Err(e) => error!("access_token 쓰기 실패 (RwLock poisoned): {:?}", e),
-        }
-        self.refresh_token = response.refresh_token.clone();
-        self.agent_uuid = response.agent_uuid.clone();
-
-        // 파일 저장
         Self::save_refresh_token(&response.refresh_token)?;
         Self::save_agent_uuid(&response.agent_uuid)?;
+        info!("등록 완료");
 
-        info!("재등록 완료");
-        Ok(())
+        Ok((response.access_token, response.refresh_token, response.agent_uuid))
+    }
+
+    /// access_token 업데이트
+    fn update_access_token(&self, new_token: &str) {
+        match self.access_token.write() {
+            Ok(mut token) => *token = new_token.to_string(),
+            Err(e) => error!("access_token 쓰기 실패 (RwLock poisoned): {:?}", e),
+        }
     }
 
     /// AuthInterceptor에 전달할 SharedAccessToken 반환
@@ -127,14 +134,7 @@ impl TokenManager {
     }
 
     fn load_refresh_token() -> Result<String> {
-        let path = Path::new(TOKEN_PATH);
-        let token = fs::read_to_string(path)?;
-
-        if token.trim().is_empty() {
-            return Err(anyhow!("저장된 refresh_token이 비어 있음"));
-        }
-
-        Ok(token)
+        Self::load_from_file(TOKEN_PATH, "refresh_token")
     }
 
     fn save_refresh_token(refresh_token: &str) -> Result<()> {
@@ -142,18 +142,22 @@ impl TokenManager {
     }
 
     fn load_agent_uuid() -> Result<String> {
-        let path = Path::new(AGENT_UUID_PATH);
-        let agent_uuid = fs::read_to_string(path)?;
-
-        if agent_uuid.trim().is_empty() {
-            return Err(anyhow!("저장된 agent_uuid가 비어 있음"));
-        }
-
-        Ok(agent_uuid)
+        Self::load_from_file(AGENT_UUID_PATH, "agent_uuid")
     }
 
     fn save_agent_uuid(agent_uuid: &str) -> Result<()> {
         Self::save_to_file(AGENT_UUID_PATH, agent_uuid)
+    }
+
+    fn load_from_file(file_path: &str, name: &str) -> Result<String> {
+        let path = Path::new(file_path);
+        let content = fs::read_to_string(path)?;
+
+        if content.trim().is_empty() {
+            return Err(anyhow!("저장된 {}가 비어 있음", name));
+        }
+
+        Ok(content)
     }
 
     fn save_to_file(file_path: &str, content: &str) -> Result<()> {

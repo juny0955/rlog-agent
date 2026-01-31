@@ -17,7 +17,7 @@ use crate::models::LogEvent;
 use crate::proto::log::LogBatch;
 use crate::settings::{Settings, SourceSettings};
 use crate::streamer::Streamer;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use chrono_tz::Tz;
 use tokio::signal;
 use tokio::sync::mpsc;

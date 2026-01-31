@@ -40,7 +40,6 @@ impl AuthClient {
         let req = RefreshRequest { refresh_token };
 
         let response = self.client.refresh(req).await?.into_inner();
-
         info!("토큰 갱신 완료");
 
         Ok(response)
