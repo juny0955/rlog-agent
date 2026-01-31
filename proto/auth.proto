@@ -1,0 +1,45 @@
+syntax = "proto3";
+package auth;
+
+service AuthService {
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc Refresh(RefreshRequest) returns (RefreshResponse);
+}
+
+// Register
+message RegisterRequest {
+    string project_key = 1;
+    string hostname = 2;
+    string os = 3;
+    string os_version = 4;
+}
+
+message RegisterResponse {
+    bool success = 1;
+
+    string access_token = 2;
+    string refresh_token = 3;
+
+    string timezone = 4;
+    uint64 batch_size = 5;
+    uint64 flush_interval_sec = 6;
+
+    repeated Source sources = 7;
+
+    message Source {
+        string label = 1;
+        string path = 2;
+        bool enabled = 3;
+    }
+}
+
+// Refresh
+message RefreshRequest {
+    string refresh_token = 1;
+}
+
+message RefreshResponse {
+    bool success = 1;
+    string access_token = 2;
+    string refresh_token = 3;
+}

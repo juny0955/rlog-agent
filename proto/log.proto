@@ -1,0 +1,29 @@
+syntax = "proto3";
+package log;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+service LogService {
+  rpc Send(stream LogBatch) returns (google.protobuf.Empty);
+}
+
+message LogBatch {
+  string batch_id = 1;
+  google.protobuf.Timestamp send_at = 2;
+
+  repeated Log logs = 3;
+}
+
+message Log {
+  string label = 1;
+  string line = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+//message SendAck {
+//  bool ok = 1;
+//  string message = 2;
+//  string batch_id = 3;
+//  uint32 accepted = 4;
+//}

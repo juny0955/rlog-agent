@@ -1,4 +1,10 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tonic_prost_build::compile_protos("proto/agent.proto")?;
+    println!("cargo:rerun-if-changed=proto/log.proto");
+    println!("cargo:rerun-if-changed=proto/auth.proto");
+    println!("cargo:rerun-if-changed=proto");
+
+    tonic_prost_build::compile_protos("proto/log.proto")?;
+    tonic_prost_build::compile_protos("proto/auth.proto")?;
+
     Ok(())
 }
