@@ -21,6 +21,9 @@ pub struct Settings {
     
     #[serde(default = "default_flush_interval")]
     pub flush_interval: u64,
+
+    #[serde(default = "default_heartbeat_interval")]
+    pub heartbeat_interval: u64,
     pub sources: Vec<SourceSettings>,
 }
 
@@ -32,6 +35,7 @@ pub struct SourceSettings {
 
 fn default_batch_size() -> usize { 1000 }
 fn default_flush_interval() -> u64 { 10 }
+fn default_heartbeat_interval() -> u64 { 30 }
 
 impl Settings {
     pub fn load_settings() -> Result<Self> {
@@ -62,6 +66,7 @@ impl Settings {
             timezone,
             batch_size: register_response.batch_size as usize,
             flush_interval: register_response.flush_interval_sec,
+            heartbeat_interval: default_heartbeat_interval(),
             sources,
         })
     }

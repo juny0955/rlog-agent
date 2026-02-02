@@ -5,6 +5,7 @@ mod forwarder;
 mod streamer;
 mod auth;
 mod proto;
+mod health;
 
 use std::sync::Arc;
 
@@ -17,7 +18,8 @@ use crate::models::LogEvent;
 use crate::proto::log::LogBatch;
 use crate::settings::{Settings, SourceSettings};
 use crate::streamer::Streamer;
-use anyhow::{anyhow, bail, Context, Result};
+use crate::health::HealthReporter;
+use anyhow::{anyhow, bail, Result};
 use chrono_tz::Tz;
 use tokio::signal;
 use tokio::sync::mpsc;
@@ -70,12 +72,21 @@ async fn main() -> Result<()>{
         Arc::clone(&token_manager),
     ).await?;
 
+    let health_handle = start_health_reporter(
+        &settings.server_addr,
+        Arc::clone(&token_manager),
+        shutdown.child_token(),
+    ).await?;
+
     tokio::select! {
         _ = forwarder_handle => {
             error!("Forwarder 종료");
         }
         _ = streamer_handle => {
             error!("Streamer 종료");
+        }
+        _ = health_handle => {
+            error!("HealthReporter 종료");
         }
         _ = signal::ctrl_c() => {
             info!("Ctrl+C 감지..");
@@ -186,6 +197,30 @@ async fn start_streamer(
 
     let handle = tokio::spawn(async move {
         streamer.start().await;
+    });
+
+    Ok(handle)
+}
+
+async fn start_health_reporter(
+    server_addr: &str,
+    token_manager: Arc<RwLock<TokenManager>>,
+    shutdown: CancellationToken,
+) -> Result<JoinHandle<()>> {
+    let channel = Channel::from_shared(server_addr.to_string())?
+        .connect()
+        .await?;
+
+    let shared_token = {
+        let tm = token_manager.read().await;
+        tm.get_shared_token()
+    };
+
+    let interceptor = AuthInterceptor::new(shared_token);
+    let reporter = HealthReporter::new(channel, interceptor, token_manager);
+
+    let handle = tokio::spawn(async move {
+        reporter.start(shutdown).await;
     });
 
     Ok(handle)

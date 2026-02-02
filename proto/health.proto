@@ -1,0 +1,15 @@
+syntax = "proto3";
+package health;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+service HealthService {
+  rpc Heartbeat(HeartbeatRequest) returns (google.protobuf.Empty);
+}
+
+message HeartbeatRequest {
+  google.protobuf.Timestamp timestamp = 1;
+  double cpu = 2;
+  double memory = 3;
+}

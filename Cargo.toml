@@ -23,6 +23,7 @@ uuid = { version = "1.20.0", features = ["v4"] }
 gethostname = "1.1.0"
 os_info = "3.14.0"
 serde_yaml = "0.9.34"
+sysinfo = "0.35"
 
 [build-dependencies]
 tonic-prost-build = "0.14.2"
