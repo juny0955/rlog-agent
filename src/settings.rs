@@ -1,11 +1,9 @@
 use crate::proto::auth::RegisterResponse;
 use anyhow::Result;
-use chrono_tz::Tz;
 use config::{Config, File};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use std::str::FromStr;
 use tracing::info;
 
 static CONFIG_PATH: &str = "config/agent.yaml";

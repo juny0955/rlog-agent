@@ -42,10 +42,14 @@ async fn main() -> Result<()> {
         .init();
 
     info!("Agent 시작 중..");
-    let (settings, token_manager) = load_settings_and_auth().await?;
+    let (settings, token_manager, channel) = load_settings_and_auth().await?;
 
     let shutdown = CancellationToken::new();
     let token_manager = Arc::new(RwLock::new(token_manager));
+    let interceptor = {
+        let tm = token_manager.read().await;
+        AuthInterceptor::new(tm.get_shared_token())
+    };
 
     let (collector_tx, collector_rx) = mpsc::channel::<LogEvent>(100);
     let (streamer_tx, streamer_rx) = mpsc::channel::<LogBatch>(1000);
@@ -67,14 +71,16 @@ async fn main() -> Result<()> {
 
     let streamer_handle = start_streamer(
         streamer_rx,
-        &settings.server_addr,
+        channel.clone(),
         Arc::clone(&token_manager),
+        interceptor.clone(),
     )
     .await?;
 
     let health_handle = start_health_reporter(
-        &settings.server_addr,
+        channel,
         Arc::clone(&token_manager),
+        interceptor.clone(),
         shutdown.child_token(),
     )
     .await?;
@@ -125,22 +131,30 @@ async fn start_collectors(
     Ok(handles)
 }
 
-async fn load_settings_and_auth() -> Result<(Settings, TokenManager)> {
+async fn load_settings_and_auth() -> Result<(Settings, TokenManager, Channel)> {
     match Settings::load_settings() {
         Ok(settings) => {
             // 설정 파일 있음 -> 저장된 토큰으로 인증
-            let auth_client = AuthClient::connect(&settings.server_addr).await?;
-            let token_manager =
-                TokenManager::load(auth_client, settings.project_key.clone()).await?;
+            let channel = Channel::from_shared(settings.server_addr.clone())?
+                .connect()
+                .await?;
+
+            let auth_client = AuthClient::new(channel.clone());
+            let token_manager = TokenManager::load(auth_client, settings.project_key.clone()).await?;
             info!("설정 및 토큰 로드 완료");
-            Ok((settings, token_manager))
+
+            Ok((settings, token_manager, channel))
         }
         Err(_) => {
             // 설정 파일 없음 -> 신규 등록
             warn!("설정파일 로드 실패, 에이전트 등록 수행");
             let (server_addr, project_key) = get_env()?;
 
-            let mut auth_client = AuthClient::connect(&server_addr).await?;
+            let channel = Channel::from_shared(server_addr.clone())?
+                .connect()
+                .await?;
+
+            let mut auth_client = AuthClient::new(channel.clone());
             let response = auth_client.register(&project_key, None).await?;
 
             if !response.success {
@@ -154,9 +168,8 @@ async fn load_settings_and_auth() -> Result<(Settings, TokenManager)> {
             )?;
             settings.save_settings()?;
 
-            let auth_client_for_token = AuthClient::connect(&server_addr).await?;
             let token_manager = TokenManager::new(
-                auth_client_for_token,
+                auth_client,
                 response.access_token,
                 response.refresh_token,
                 response.agent_uuid,
@@ -164,7 +177,7 @@ async fn load_settings_and_auth() -> Result<(Settings, TokenManager)> {
             )?;
 
             info!("에이전트 등록 및 설정 저장 완료");
-            Ok((settings, token_manager))
+            Ok((settings, token_manager, channel))
         }
     }
 }
@@ -185,19 +198,10 @@ async fn start_forwarder(
 
 async fn start_streamer(
     rx: Receiver<LogBatch>,
-    server_addr: &str,
+    channel: Channel,
     token_manager: Arc<RwLock<TokenManager>>,
+    interceptor: AuthInterceptor,
 ) -> Result<JoinHandle<()>> {
-    let channel = Channel::from_shared(server_addr.to_string())?
-        .connect()
-        .await?;
-
-    let shared_token = {
-        let tm = token_manager.read().await;
-        tm.get_shared_token()
-    };
-
-    let interceptor = AuthInterceptor::new(shared_token);
     let streamer = Streamer::new(rx, channel, interceptor, token_manager);
 
     let handle = tokio::spawn(async move {
@@ -208,20 +212,11 @@ async fn start_streamer(
 }
 
 async fn start_health_reporter(
-    server_addr: &str,
+    channel: Channel,
     token_manager: Arc<RwLock<TokenManager>>,
+    interceptor: AuthInterceptor,
     shutdown: CancellationToken,
 ) -> Result<JoinHandle<()>> {
-    let channel = Channel::from_shared(server_addr.to_string())?
-        .connect()
-        .await?;
-
-    let shared_token = {
-        let tm = token_manager.read().await;
-        tm.get_shared_token()
-    };
-
-    let interceptor = AuthInterceptor::new(shared_token);
     let reporter = HealthReporter::new(channel, interceptor, token_manager);
 
     let handle = tokio::spawn(async move {

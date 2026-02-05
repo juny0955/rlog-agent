@@ -10,9 +10,8 @@ pub struct AuthClient {
 }
 
 impl AuthClient {
-    pub async fn connect(server_addr: &str) -> Result<Self> {
-        let client = AuthServiceClient::connect(server_addr.to_string()).await?;
-        Ok(Self { client })
+    pub fn new(channel: Channel) -> Self {
+        Self { client: AuthServiceClient::new(channel) }
     }
 
     pub async fn register(
