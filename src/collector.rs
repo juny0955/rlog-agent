@@ -2,12 +2,11 @@ use crate::models::LogEvent;
 use crate::settings::SourceSettings;
 use anyhow::{Context, Result};
 use chrono::Utc;
-use chrono_tz::Tz;
-use notify::{recommended_watcher, Watcher};
+use notify::{Watcher, recommended_watcher};
 use std::fs::Metadata;
 use std::io::SeekFrom;
 use std::path::PathBuf;
-use tokio::fs::{metadata, File};
+use tokio::fs::{File, metadata};
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio::sync::mpsc::{self, Sender};
 use tokio_util::sync::CancellationToken;
@@ -22,30 +21,40 @@ pub struct Collector {
     tx: Sender<LogEvent>,
     label: String,
     path: PathBuf,
-    tz: Tz,
     reader: BufReader<File>,
     position: u64,
     file_id: u64,
 }
 
 impl Collector {
-    pub async fn new(tx: Sender<LogEvent>, source: SourceSettings, tz: Tz) -> Result<Self> {
+    pub async fn new(tx: Sender<LogEvent>, source: SourceSettings) -> Result<Self> {
         let path = PathBuf::from(source.path);
 
-        let (reader, position, file_id) = open_file(&path, true).await
+        let (reader, position, file_id) = open_file(&path, true)
+            .await
             .with_context(|| format!("파일 열기 실패: {}", source.label))?;
 
-        Ok(Self { tx, label: source.label, path, tz, reader, position, file_id })
+        Ok(Self {
+            tx,
+            label: source.label,
+            path,
+            reader,
+            position,
+            file_id,
+        })
     }
 
     pub async fn start(&mut self, shutdown: CancellationToken) {
         let (watcher_tx, mut watcher_rx) = mpsc::channel::<()>(1);
 
         let mut watcher = recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-            if let Ok(event) = res && event.kind.is_modify() {
+            if let Ok(event) = res
+                && event.kind.is_modify()
+            {
                 let _ = watcher_tx.try_send(());
             }
-        }).expect("Watcher 생성 실패");
+        })
+        .expect("Watcher 생성 실패");
 
         if let Err(e) = watcher.watch(&self.path, notify::RecursiveMode::NonRecursive) {
             error!("{} 파일 감지 설정 중 오류 {}", self.label, e);
@@ -73,16 +82,22 @@ impl Collector {
                 }
             }
         }
-        
+
         info!("{} Collector 종료..", self.label);
     }
 
     async fn read_line_to_send(&mut self, line: &mut String) -> Result<()> {
         loop {
-            let read_bytes = self.reader.read_line(line).await.context("라인 읽기 실패")?;
+            let read_bytes = self
+                .reader
+                .read_line(line)
+                .await
+                .context("라인 읽기 실패")?;
 
             if read_bytes == 0 {
-                if let Ok(meta) = metadata(&self.path).await && self.check_rotation_or_truncate(meta).await? {
+                if let Ok(meta) = metadata(&self.path).await
+                    && self.check_rotation_or_truncate(meta).await?
+                {
                     continue;
                 }
                 break;
@@ -112,7 +127,10 @@ impl Collector {
         }
 
         if current_len < self.position {
-            info!("{} Truncation  감지 {} -> {}", self.label, self.position, current_len);
+            info!(
+                "{} Truncation  감지 {} -> {}",
+                self.label, self.position, current_len
+            );
             self.reopen(true).await?;
             return Ok(true);
         }
@@ -124,11 +142,11 @@ impl Collector {
         if line.trim().is_empty() {
             return Ok(());
         }
-        
+
         let event = LogEvent {
             label: self.label.clone(),
             content: line.trim_end().to_string(),
-            timestamp: Utc::now().with_timezone(&self.tz),
+            timestamp: Utc::now(),
         };
 
         self.tx.send(event).await.context("메세지 채널 닫힘")?;
@@ -137,7 +155,9 @@ impl Collector {
     }
 
     async fn reopen(&mut self, seek_to_end: bool) -> Result<()> {
-        let (reader, position, file_id) = open_file(&self.path, seek_to_end).await.context("파일 재열기 실패")?;
+        let (reader, position, file_id) = open_file(&self.path, seek_to_end)
+            .await
+            .context("파일 재열기 실패")?;
 
         self.reader = reader;
         self.position = position;
@@ -156,7 +176,10 @@ async fn open_file(path: &PathBuf, seek_to_end: bool) -> Result<(BufReader<File>
     let file_id = get_file_id(&meta);
 
     let mut reader = BufReader::new(file);
-    reader.seek(SeekFrom::Start(position)).await.context("파일 포인터 이동 실패")?;
+    reader
+        .seek(SeekFrom::Start(position))
+        .await
+        .context("파일 포인터 이동 실패")?;
 
     Ok((reader, position, file_id))
 }

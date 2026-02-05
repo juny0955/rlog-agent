@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use crate::auth::client::AuthClient;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use tracing::{error, info};
 
 static TOKEN_PATH: &str = "state/token";
@@ -44,17 +44,18 @@ impl TokenManager {
         let refresh_token = Self::load_refresh_token()?;
         let agent_uuid = Self::load_agent_uuid().unwrap_or_default();
 
-        let (access_token, refresh_token, agent_uuid) = match auth_client.refresh(refresh_token.clone()).await {
-            Ok(resp) if resp.success => {
-                Self::save_refresh_token(&resp.refresh_token)?;
-                info!("저장된 토큰으로 인증 완료");
-                (resp.access_token, resp.refresh_token, agent_uuid)
-            }
-            Ok(_) | Err(_) => {
-                info!("토큰 갱신 실패, 재등록 시도");
-                Self::do_register(&mut auth_client, &project_key).await?
-            }
-        };
+        let (access_token, refresh_token, agent_uuid) =
+            match auth_client.refresh(refresh_token.clone()).await {
+                Ok(resp) if resp.success => {
+                    Self::save_refresh_token(&resp.refresh_token)?;
+                    info!("저장된 토큰으로 인증 완료");
+                    (resp.access_token, resp.refresh_token, agent_uuid)
+                }
+                Ok(_) | Err(_) => {
+                    info!("토큰 갱신 실패, 재등록 시도");
+                    Self::do_register(&mut auth_client, &project_key).await?
+                }
+            };
 
         Ok(Self {
             access_token: Arc::new(RwLock::new(access_token)),
@@ -69,7 +70,7 @@ impl TokenManager {
     pub async fn refresh(&mut self) -> Result<()> {
         let response = match self.auth_client.refresh(self.refresh_token.clone()).await {
             Ok(resp) if resp.success => resp,
-            Ok(_) | Err(_)=> {
+            Ok(_) | Err(_) => {
                 info!("토큰 갱신 실패, 재등록 시도");
                 return self.re_register().await;
             }
@@ -117,7 +118,11 @@ impl TokenManager {
         Self::save_agent_uuid(&response.agent_uuid)?;
         info!("등록 완료");
 
-        Ok((response.access_token, response.refresh_token, response.agent_uuid))
+        Ok((
+            response.access_token,
+            response.refresh_token,
+            response.agent_uuid,
+        ))
     }
 
     /// access_token 업데이트

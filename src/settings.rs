@@ -14,11 +14,10 @@ static CONFIG_PATH: &str = "config/agent.yaml";
 pub struct Settings {
     pub server_addr: String,
     pub project_key: String,
-    pub timezone: Tz,
 
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
-    
+
     #[serde(default = "default_flush_interval")]
     pub flush_interval: u64,
 
@@ -35,7 +34,9 @@ pub struct SourceSettings {
 
 fn default_batch_size() -> usize { 1000 }
 fn default_flush_interval() -> u64 { 10 }
-fn default_heartbeat_interval() -> u64 { 30 }
+fn default_heartbeat_interval() -> u64 {
+    30
+}
 
 impl Settings {
     pub fn load_settings() -> Result<Self> {
@@ -48,10 +49,13 @@ impl Settings {
         Ok(settings)
     }
 
-    pub fn from_response(register_response: RegisterResponse, server_addr: String, project_key: String) -> Result<Self>{
-        let timezone = Tz::from_str(&register_response.timezone)?;
-
-        let sources = register_response.sources
+    pub fn from_response(
+        register_response: RegisterResponse,
+        server_addr: String,
+        project_key: String,
+    ) -> Result<Self> {
+        let sources = register_response
+            .sources
             .into_iter()
             .filter(|s| s.enabled)
             .map(|s| SourceSettings {
@@ -63,7 +67,6 @@ impl Settings {
         Ok(Self {
             server_addr,
             project_key,
-            timezone,
             batch_size: register_response.batch_size as usize,
             flush_interval: register_response.flush_interval_sec,
             heartbeat_interval: default_heartbeat_interval(),

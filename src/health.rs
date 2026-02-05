@@ -1,21 +1,23 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
+use chrono::Utc;
 use sysinfo::System;
 use tokio::sync::RwLock;
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Channel;
 use tonic::Code;
+use tonic::service::interceptor::InterceptedService;
+use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
 
 use crate::auth::interceptor::AuthInterceptor;
 use crate::auth::token_manager::TokenManager;
-use crate::proto::health::health_service_client::HealthServiceClient;
 use crate::proto::health::HeartbeatRequest;
+use crate::proto::health::health_service_client::HealthServiceClient;
 
-type HealthClient = HealthServiceClient<tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>>;
+type HealthClient = HealthServiceClient<InterceptedService<Channel, AuthInterceptor>>;
 
 static HEARTBEAT_INTERVAL_SECS: u64 = 10;
 
@@ -67,14 +69,15 @@ impl HealthReporter {
 
         let cpu = self.system.global_cpu_usage() as f64;
         let memory = self.calculate_memory_usage();
+        let sys_time = SystemTime::from(Utc::now());
 
         let request = HeartbeatRequest {
-            timestamp: Some(prost_types::Timestamp::from(std::time::SystemTime::now())),
+            timestamp: Some(prost_types::Timestamp::from(sys_time)),
             cpu,
             memory,
         };
 
-        match self.send_request(request.clone()).await {
+        match self.send_request(request).await {
             Ok(_) => {
                 debug!(cpu = %cpu, memory = %memory, "Heartbeat 전송 완료");
                 Ok(())

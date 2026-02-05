@@ -15,7 +15,11 @@ impl AuthClient {
         Ok(Self { client })
     }
 
-    pub async fn register(&mut self, project_key: &str, agent_uuid: Option<&str>) -> Result<RegisterResponse> {
+    pub async fn register(
+        &mut self,
+        project_key: &str,
+        agent_uuid: Option<&str>,
+    ) -> Result<RegisterResponse> {
         let hostname = gethostname::gethostname().to_string_lossy().into_owned();
 
         let os_info = os_info::get();

@@ -1,16 +1,17 @@
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::{mpsc::Receiver, RwLock};
-use tonic::transport::Channel;
+use tokio::sync::{RwLock, mpsc::Receiver};
 use tonic::Code;
+use tonic::transport::Channel;
 use tracing::{error, info, warn};
 
 use crate::auth::interceptor::AuthInterceptor;
 use crate::auth::token_manager::TokenManager;
-use crate::proto::log::log_service_client::LogServiceClient;
 use crate::proto::log::LogBatch;
+use crate::proto::log::log_service_client::LogServiceClient;
 
-type LogClient = LogServiceClient<tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>>;
+type LogClient =
+    LogServiceClient<tonic::service::interceptor::InterceptedService<Channel, AuthInterceptor>>;
 
 pub struct Streamer {
     rx: Receiver<LogBatch>,
@@ -26,7 +27,11 @@ impl Streamer {
         token_manager: Arc<RwLock<TokenManager>>,
     ) -> Self {
         let client = LogServiceClient::with_interceptor(channel, interceptor);
-        Self { rx, client, token_manager }
+        Self {
+            rx,
+            client,
+            token_manager,
+        }
     }
 
     pub async fn start(mut self) {

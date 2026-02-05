@@ -1,9 +1,8 @@
-use chrono::DateTime;
-use chrono_tz::Tz;
+use chrono::{DateTime, Utc};
 
 #[derive(Debug)]
 pub struct LogEvent {
     pub label: String,
     pub content: String,
-    pub timestamp: DateTime<Tz>,
+    pub timestamp: DateTime<Utc>,
 }

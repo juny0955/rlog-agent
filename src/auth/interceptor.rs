@@ -16,7 +16,8 @@ impl AuthInterceptor {
 
 impl Interceptor for AuthInterceptor {
     fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        let token = self.access_token
+        let token = self
+            .access_token
             .read()
             .map_err(|_| Status::internal("토큰 읽기 실패 (RwLock poisoned)"))?
             .clone();

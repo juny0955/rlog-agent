@@ -1,11 +1,11 @@
-mod settings;
-mod models;
+mod auth;
 mod collector;
 mod forwarder;
-mod streamer;
-mod auth;
-mod proto;
 mod health;
+mod models;
+mod proto;
+mod settings;
+mod streamer;
 
 use std::sync::Arc;
 
@@ -14,13 +14,12 @@ use crate::auth::interceptor::AuthInterceptor;
 use crate::auth::token_manager::TokenManager;
 use crate::collector::Collector;
 use crate::forwarder::Forwarder;
+use crate::health::HealthReporter;
 use crate::models::LogEvent;
 use crate::proto::log::LogBatch;
 use crate::settings::{Settings, SourceSettings};
 use crate::streamer::Streamer;
-use crate::health::HealthReporter;
 use anyhow::{anyhow, bail, Result};
-use chrono_tz::Tz;
 use tokio::signal;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -35,11 +34,10 @@ static ENV_SERVER_ADDR: &str = "SERVER_ADDR";
 static ENV_PROJECT_KEY: &str = "PROJECT_KEY";
 
 #[tokio::main]
-async fn main() -> Result<()>{
+async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info"))
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 
@@ -55,28 +53,31 @@ async fn main() -> Result<()>{
     let collector_handles = start_collectors(
         collector_tx,
         settings.sources,
-        settings.timezone,
-        shutdown.child_token()
-    ).await?;
+        shutdown.child_token(),
+    )
+    .await?;
 
     let forwarder_handle = start_forwarder(
         collector_rx,
         streamer_tx,
         settings.batch_size,
         settings.flush_interval,
-    ).await?;
+    )
+    .await?;
 
     let streamer_handle = start_streamer(
         streamer_rx,
         &settings.server_addr,
         Arc::clone(&token_manager),
-    ).await?;
+    )
+    .await?;
 
     let health_handle = start_health_reporter(
         &settings.server_addr,
         Arc::clone(&token_manager),
         shutdown.child_token(),
-    ).await?;
+    )
+    .await?;
 
     tokio::select! {
         _ = forwarder_handle => {
@@ -108,13 +109,12 @@ async fn main() -> Result<()>{
 async fn start_collectors(
     tx: Sender<LogEvent>,
     source_settings: Vec<SourceSettings>,
-    tz: Tz,
-    shutdown: CancellationToken
-) -> Result<Vec<JoinHandle<()>>>{
+    shutdown: CancellationToken,
+) -> Result<Vec<JoinHandle<()>>> {
     let mut handles = Vec::new();
 
     for source in source_settings {
-        let mut collector = Collector::new(tx.clone(), source, tz).await?;
+        let mut collector = Collector::new(tx.clone(), source).await?;
         let child_shutdown = shutdown.child_token();
 
         handles.push(tokio::spawn(async move {
@@ -130,7 +130,8 @@ async fn load_settings_and_auth() -> Result<(Settings, TokenManager)> {
         Ok(settings) => {
             // 설정 파일 있음 -> 저장된 토큰으로 인증
             let auth_client = AuthClient::connect(&settings.server_addr).await?;
-            let token_manager = TokenManager::load(auth_client, settings.project_key.clone()).await?;
+            let token_manager =
+                TokenManager::load(auth_client, settings.project_key.clone()).await?;
             info!("설정 및 토큰 로드 완료");
             Ok((settings, token_manager))
         }
@@ -146,7 +147,11 @@ async fn load_settings_and_auth() -> Result<(Settings, TokenManager)> {
                 bail!("에이전트 등록 실패");
             }
 
-            let settings = Settings::from_response(response.clone(), server_addr.clone(), project_key.clone())?;
+            let settings = Settings::from_response(
+                response.clone(),
+                server_addr.clone(),
+                project_key.clone(),
+            )?;
             settings.save_settings()?;
 
             let auth_client_for_token = AuthClient::connect(&server_addr).await?;
@@ -172,7 +177,7 @@ async fn start_forwarder(
 ) -> Result<JoinHandle<()>> {
     let forwarder = Forwarder::new(rx, tx, batch_size, flush_interval);
     let handle = tokio::spawn(async move {
-       forwarder.start().await;
+        forwarder.start().await;
     });
 
     Ok(handle)

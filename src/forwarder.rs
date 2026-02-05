@@ -20,13 +20,13 @@ impl Forwarder {
         rx: Receiver<LogEvent>,
         tx: Sender<LogBatch>,
         batch_size: usize,
-        flush_interval: u64
+        flush_interval: u64,
     ) -> Self {
         Self {
             rx,
             tx,
             batch_size,
-            flush_interval: Duration::from_secs(flush_interval)
+            flush_interval: Duration::from_secs(flush_interval),
         }
     }
 
@@ -65,7 +65,9 @@ impl Forwarder {
     }
 
     async fn flush(&self, logs: &mut Vec<Log>) {
-        if logs.is_empty() { return; }
+        if logs.is_empty() {
+            return;
+        }
 
         let send_logs = mem::take(logs);
         let batch_id = Uuid::new_v4().to_string();
@@ -95,5 +97,8 @@ fn event_to_log(event: LogEvent) -> Log {
 
 fn now() -> Timestamp {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    Timestamp { seconds: now.as_secs() as i64, nanos: now.subsec_nanos() as i32 }
+    Timestamp {
+        seconds: now.as_secs() as i64,
+        nanos: now.subsec_nanos() as i32,
+    }
 }
