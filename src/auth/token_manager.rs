@@ -3,11 +3,13 @@ use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use crate::auth::client::AuthClient;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use tracing::{error, info};
 
-static TOKEN_PATH: &str = "state/token";
+static REFRESH_TOKEN_PATH: &str = "state/token";
+static REFRESH_TOKEN: &str = "refresh_token";
 static AGENT_UUID_PATH: &str = "state/agent_uuid";
+static AGENT_UUID: &str = "agent_uuid";
 
 pub type SharedAccessToken = Arc<RwLock<String>>;
 
@@ -138,21 +140,15 @@ impl TokenManager {
         Arc::clone(&self.access_token)
     }
 
-    fn load_refresh_token() -> Result<String> {
-        Self::load_from_file(TOKEN_PATH, "refresh_token")
-    }
+    fn load_refresh_token() -> Result<String> { Self::load_from_file(REFRESH_TOKEN_PATH, REFRESH_TOKEN) }
 
-    fn save_refresh_token(refresh_token: &str) -> Result<()> {
-        Self::save_to_file(TOKEN_PATH, refresh_token)
-    }
+    fn save_refresh_token(refresh_token: &str) -> Result<()> { Self::save_to_file(REFRESH_TOKEN_PATH, refresh_token) }
 
     fn load_agent_uuid() -> Result<String> {
-        Self::load_from_file(AGENT_UUID_PATH, "agent_uuid")
+        Self::load_from_file(AGENT_UUID_PATH, AGENT_UUID)
     }
 
-    fn save_agent_uuid(agent_uuid: &str) -> Result<()> {
-        Self::save_to_file(AGENT_UUID_PATH, agent_uuid)
-    }
+    fn save_agent_uuid(agent_uuid: &str) -> Result<()> { Self::save_to_file(AGENT_UUID_PATH, agent_uuid) }
 
     fn load_from_file(file_path: &str, name: &str) -> Result<String> {
         let path = Path::new(file_path);

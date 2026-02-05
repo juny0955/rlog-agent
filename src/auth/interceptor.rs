@@ -3,6 +3,8 @@ use tonic::{Request, Status};
 
 use crate::auth::token_manager::SharedAccessToken;
 
+static AUTHORIZATION: &str = "authorization";
+
 #[derive(Clone)]
 pub struct AuthInterceptor {
     access_token: SharedAccessToken,
@@ -28,9 +30,9 @@ impl Interceptor for AuthInterceptor {
 
         let value = format!("Bearer {}", token)
             .parse()
-            .map_err(|_| Status::internal("Invalid token format"))?;
+            .map_err(|_| Status::internal("토큰 형식이 잘못되었습니다."))?;
 
-        request.metadata_mut().insert("authorization", value);
+        request.metadata_mut().insert(AUTHORIZATION, value);
 
         Ok(request)
     }
