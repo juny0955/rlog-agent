@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc::Receiver};
 use tonic::Code;
+use tonic::codec::CompressionEncoding;
 use tonic::service::interceptor::InterceptedService;
 use tonic::transport::Channel;
 use tracing::{error, info, warn};
@@ -26,7 +27,8 @@ impl Streamer {
         interceptor: AuthInterceptor,
         token_manager: Arc<RwLock<TokenManager>>,
     ) -> Self {
-        let client = LogServiceClient::with_interceptor(channel, interceptor);
+        let client = LogServiceClient::with_interceptor(channel, interceptor)
+            .send_compressed(CompressionEncoding::Gzip);
         Self {
             rx,
             client,

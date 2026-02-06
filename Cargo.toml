@@ -14,8 +14,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 serde = { version = "1.0.228", features = ["derive"] }
 config = { version = "0.15.19", features = ["yaml"] }
 chrono = { version = "0.4.43", features = ["serde"] }
-chrono-tz = { version = "0.10.4", features = ["serde"] }
-tonic = { version = "0.14.2", features = ["transport"] }
+tonic = { version = "0.14.2", features = ["transport", "gzip"] }
 tonic-prost = "0.14.2"
 prost = "0.14.3"
 prost-types = "0.14.3"
@@ -23,7 +22,7 @@ uuid = { version = "1.20.0", features = ["v4"] }
 gethostname = "1.1.0"
 os_info = "3.14.0"
 serde_yaml = "0.9.34"
-sysinfo = "0.35"
+sysinfo = "0.38.0"
 
 [build-dependencies]
 tonic-prost-build = "0.14.2"
